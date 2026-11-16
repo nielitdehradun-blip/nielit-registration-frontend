@@ -45,7 +45,6 @@ function Registration() {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("");
     const [messageType, setMessageType] = useState("");
-    console.log(loading)
 
     const courses = {
         "GEN/OBC": ["CCC", "O Level", "A Level", "B Level"],
@@ -182,6 +181,8 @@ function Registration() {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
+        if (loading) return;
+
         if (!preview) {
             alert("Please capture photo first");
             return;
@@ -197,69 +198,69 @@ function Registration() {
         }
 
         setLoading(true);
+        setMessage("");
+        setMessageType("");
 
-        const submitData = new FormData();
+        try {
+            if (!canvasRef.current) {
+                throw new Error("Photo canvas is not available. Please capture the photo again.");
+            }
 
-        Object.entries(formData).forEach(([key, value]) => {
-            submitData.append(key, value);
-        });
-
-        canvasRef.current.toBlob(
-            async (blob) => {
-                try {
-
-                    submitData.append(
-                        "photo",
-                        blob,
-                        "student-photo.png"
-                    );
-
-                    const response = await fetch(
-                        `${API_URL}/api/register`,
-                        {
-                            method: "POST",
-                            body: submitData,
+            const blob = await new Promise((resolve, reject) => {
+                canvasRef.current.toBlob(
+                    (imageBlob) => {
+                        if (imageBlob) {
+                            resolve(imageBlob);
+                        } else {
+                            reject(new Error("Unable to process the captured photo. Please capture it again."));
                         }
-                    );
+                    },
+                    "image/png",
+                    1
+                );
+            });
 
-                    const result =
-                        await response.json();
+            const submitData = new FormData();
 
-                    if (!response.ok) {
-                        throw new Error(
-                            result.message
-                        );
-                    }
+            Object.entries(formData).forEach(([key, value]) => {
+                submitData.append(key, value);
+            });
 
-                    setMessage(
-                        result.message || "Registration Successful"
-                    );
+            submitData.append("photo", blob, "student-photo.png");
 
-                    setMessageType("success");
+            const response = await fetch(`${API_URL}/api/register`, {
+                method: "POST",
+                body: submitData,
+            });
 
-                    sendWhatsappMessage();
-                    resetForm();
+            const result = await response.json();
 
-                } catch (error) {
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || "Registration failed. Please try again.");
+            }
 
-                    console.error(error);
+            const studentId = result.student?.studentId;
+            setMessage(
+                studentId
+                    ? `${result.message || "Registration Successful"} | Student ID: ${studentId}`
+                    : result.message || "Registration Successful"
+            );
+            setMessageType("success");
 
-                    setMessage(
-                        error.message ||
-                        "Submission Failed"
-                    );
+            // Keep the original form values available until the WhatsApp
+            // confirmation text has been prepared.
+            sendWhatsappMessage();
 
-                    setMessageType("error");
-
-                } finally {
-
-                    setLoading(false);
-
-                }
-            },
-            "image/png",
-            1
-        );
+            resetForm();
+        } catch (error) {
+            console.error("Registration submission failed:", error);
+            setMessage(error.message || "Submission Failed. Please try again.");
+            setMessageType("error");
+        } finally {
+            // This runs for success and failure, so the loader cannot remain
+            // active after the request/photo processing has completed.
+            setLoading(false);
+        }
     };
 
     useEffect(() => {
